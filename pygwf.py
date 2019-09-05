@@ -68,26 +68,29 @@ def build_format_str(data, size_codes, var_names=None):
 			size_code_base = size_code.split("[")[0]
 			arr_len_names = [name[:-1] for name in size_code.split("[")[1:]]  # Remove "]"s
 
-			dim_idxs = [var_names.index(name) for name in arr_len_names]
+			# If 2+ dimensional, arrays follow row-major (C-style) order (here we treat them as 1D)
 			dimensions = []
-			for dim_idx in dim_idxs:
-				# If 2+ dimensional, arrays follow row-major (C-style) order (here we treat them as 1D)
-				dim_bytes_start = var_start_locs[dim_idx]
-				dim_size_code = var_format_codes[dim_idx]
+			for name in arr_len_names:
+				if name.isdigit():
+					dimensions.append(int(name))
+				else:
+					dim_idx = var_names.index(name)
+					dim_bytes_start = var_start_locs[dim_idx]
+					dim_size_code = var_format_codes[dim_idx]
 
-				if len(dim_size_code) != 1:
-					# Can't be a type we need more than one format character for (i.e. STRING, PTR_STRUCT, COMPLEX*)
-					raise ValueError
+					if len(dim_size_code) != 1:
+						# Can't be a type we need more than one format character for (i.e. STRING, PTR_STRUCT, COMPLEX*)
+						raise ValueError
 
-				dim_bytes_len = struct.calcsize(dim_size_code)
-				dimension = struct.unpack(dim_size_code, data[dim_bytes_start:dim_bytes_start + dim_bytes_len].tobytes())[0]
+					dim_bytes_len = struct.calcsize(dim_size_code)
+					dimension = struct.unpack(dim_size_code, data[dim_bytes_start:dim_bytes_start + dim_bytes_len].tobytes())[0]
 
-				special_no_data_names = "nStat", "nADC", "nProc", "nSim", "nSer", "nSummary", "nEvent", "nSimEvent"
-				# "nEvent" and "nSimEvent" aren't used as array dimensions for other variables
-				if dimension == 2**32 - 1 and any(name in arr_len_names for name in special_no_data_names):
-					dimension = 0
+					special_no_data_names = "nStat", "nADC", "nProc", "nSim", "nSer", "nSummary", "nEvent", "nSimEvent"
+					# "nEvent" and "nSimEvent" aren't used as array dimensions for other variables
+					if dimension == 2**32 - 1 and any(name in arr_len_names for name in special_no_data_names):
+						dimension = 0
 
-				dimensions.append(dimension)
+					dimensions.append(dimension)
 			dims_prod = np.prod(dimensions)
 
 			if size_code_base == "STRING":
