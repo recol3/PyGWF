@@ -1,6 +1,7 @@
 import numpy as np
 import struct
 import datetime
+import zlib
 
 
 COMMON_CODES = ("INT_8U", "CHAR_U", "CHAR_U", "INT_4U")
@@ -237,6 +238,151 @@ def parse_struct(data, size_codes, var_names):
 		instance[var_name] = var_items
 
 	return n_bytes, instance
+
+
+def get_dtype_nbits(type_id):
+	# Only data types present in aux frame are 2 (REAL_8), 3 (REAL_4), and 10 (INT_4U), so these methods haven't been tested with other types, but it shouldn't be a problem (except perhaps for complex data; we raise a ValueError below until we test that)
+	if type_id == 0:
+		# CHAR
+		block_nbits_len = 3
+		dtype = np.dtype(np.int8)
+	elif type_id == 1:
+		# INT_2S
+		block_nbits_len = 4
+		dtype = np.dtype(np.int16)
+	elif type_id == 2:
+		# REAL_8
+		block_nbits_len = 6
+		dtype = np.dtype(np.float64)
+	elif type_id == 3:
+		# REAL_4
+		block_nbits_len = 5
+		dtype = np.dtype(np.float32)
+	elif type_id == 4:
+		# INT_4S
+		block_nbits_len = 5
+		dtype = np.dtype(np.int32)
+	elif type_id == 5:
+		# INT_8S
+		block_nbits_len = 6
+		dtype = np.dtype(np.int64)
+	elif type_id == 6:
+		# COMPLEX_8 (pair of REAL_4)
+		raise NotImplementedError  # TODO untested (no complex data in raw aux frames; hoft?)
+		block_nbits_len = 5
+		dtype = np.dtype(np.complex64)
+	elif type_id == 7:
+		# COMPLEX_16 (pair of REAL_8)
+		raise NotImplementedError  # TODO untested (no complex data in raw aux frames; hoft?)
+		block_nbits_len = 6
+		dtype = np.dtype(np.complex128)
+	# elif type == 8:
+		# STRING, but STRINGs don't have a fixed byte length and the specification doesn't define one, so fall through to ValueError
+	elif type_id == 9:
+		# INT_2U
+		block_nbits_len = 4
+		dtype = np.dtype(np.uint16)
+	elif type_id == 10:
+		# INT_4U
+		block_nbits_len = 5
+		dtype = np.dtype(np.uint32)
+	elif type_id == 11:
+		# INT_8U
+		block_nbits_len = 6
+		dtype = np.dtype(np.uint64)
+	elif type_id == 12:
+		# CHAR_U
+		block_nbits_len = 3
+		dtype = np.dtype(np.uint8)
+	else:
+		raise ValueError
+
+	return dtype, block_nbits_len
+
+
+def decompress_gzip(data, data_type, n_data):
+	# TODO test with compression ID 259 (none in raw aux frames; hoft?)
+	dtype, _ = get_dtype_nbits(data_type)
+	data = zlib.decompress(b"".join(data))  # Bytes
+	assert(len(data) == n_data*dtype.itemsize)
+	return np.frombuffer(data, dtype=np.uint8).view(dtype)
+
+
+def decompress_zsup(data, data_type, n_data, n_bytes):
+	dtype, block_nbits_len = get_dtype_nbits(data_type)
+
+	# Initialize decompressed as an array of unsigned ints with the same number of bits as the data dtype. After all the bit-level processing, we will view decompressed as the actual dtype.
+	decompressed = np.zeros(n_data, dtype=np.dtype("uint{}".format(dtype.itemsize * 8)))
+
+	block_size = struct.unpack("<H", b"".join(data[:2]))[0]  # Always the first 2 bytes (unsigned short)
+
+	# Get bits, reshape them to a n_bytes x 8 matrix and flip rows to reverse bit order, then flatten back to 1D. This makes it so each data element's bits are contiguous (and little-endian). (Later, for each block, we have to flip the block element's bits back to big-endian, accounting for the element's number of bits.)
+	# In NumPy 1.17+, unpackbits and packbits accept bitorder="little" as a parameter; this is a workaround for older versions. Probably unnecessary since LIGO software seems to generally be compatible with NumPy 1.18+, but also doesn't seem to hurt performance.
+	# TODO? Remove bit order workaround?
+	data_bits = np.unpackbits(np.frombuffer(b"".join(data[2:]), dtype=np.uint8)).astype(np.bool)
+	data_bits_swapped = np.fliplr(data_bits.reshape(-1, 8)).flatten()
+	if len(data_bits_swapped) != 8*(n_bytes - 2):
+		raise ValueError
+
+	n_data_filled, bit_idx = 0, 0
+	while n_data_filled < n_data:  # Loop over blocks
+		# Find the number of bits per data element for this block
+		block_nbits_bits = data_bits_swapped[bit_idx:bit_idx + block_nbits_len][::-1]
+		block_nbits = np.packbits(np.hstack((np.zeros(8 - block_nbits_len, dtype=np.bool), block_nbits_bits)))[0] + 1
+		bit_idx += block_nbits_len
+
+		if n_data_filled + block_size > n_data:
+			block_size = n_data - n_data_filled
+
+		if block_nbits < 1:
+			raise ValueError
+		elif block_nbits == 1:
+			# This block is all 0s and there is no more data for this block; next bits are block_nbits_bits for the next block
+			decompressed[n_data_filled:n_data_filled + block_size] = 0
+		else:
+			# For np.packbits to properly read the bits, we need to flip block elements' bits back to big-endian and pad with zeros on the left. We pad with enough zeros to match the number of bits of the final dtype (i.e. the dtype of decompressed) so we can copy directly into decompressed.
+			block_bits = np.zeros((block_size, dtype.itemsize * 8), dtype=np.bool)
+			block_bits[:, -block_nbits:] = np.fliplr(data_bits_swapped[bit_idx:bit_idx + block_nbits*block_size].reshape(-1, block_nbits))
+			bit_idx += block_nbits*block_size
+
+			# Read the bits and view them as unsigned ints with the correct number of bits and big-endian byte order
+			uint_dtype = np.dtype("uint{}".format(dtype.itemsize * 8)).newbyteorder(">")
+			block_decompressed = np.packbits(block_bits).view(uint_dtype)
+
+			# Convert to signed int and subtract the value that was added during compression to make them unsigned
+			block_decompressed = block_decompressed.astype(np.int) - 2**(block_nbits - 1) + 1
+
+			decompressed[n_data_filled:n_data_filled + block_size] = block_decompressed
+
+		n_data_filled += block_size
+
+	# assert(bit_idx == len(data_bits_swapped))  # There are sometimes extra bits at the end...
+	assert(not np.any(data_bits_swapped[bit_idx:]))  # ...which should be all 0
+
+	# Undo differentiation
+	for i in range(len(decompressed) - 1):
+		decompressed[i + 1] = decompressed[i] + decompressed[i + 1]
+
+	# View as actual dtype
+	decompressed = decompressed.view(dtype)
+
+	return decompressed
+
+
+def decompress_frvect(frvect_instance):
+	compress_id = frvect_instance["compress"][0]
+	data = frvect_instance["data"]
+	data_type = frvect_instance["type"][0]
+	n_bytes = frvect_instance["nBytes"][0]
+	n_data = frvect_instance["nData"][0]
+
+	if compress_id == 257:
+		return decompress_gzip(data=data, data_type=data_type, n_data=n_data)
+	elif compress_id == 261 or compress_id == 264 or compress_id == 266:
+		return decompress_zsup(data=data, data_type=data_type, n_data=n_data, n_bytes=n_bytes)
+	else:
+		# Not implemented/tested (none in raw auxiliary frames): 256 (uncompressed raw values); 259 (gzip, differential values)
+		raise NotImplementedError
 
 
 def read_frame(frame_data, print_progress=False):
