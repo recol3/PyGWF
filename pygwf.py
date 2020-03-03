@@ -1,5 +1,6 @@
 import numpy as np
 import struct
+import re
 import datetime
 import zlib
 
@@ -104,9 +105,9 @@ def build_format_str(data, size_codes, var_names=None):
 					idx_add += idx_add_add
 
 			else:
-				idx_add, fs_add = get_type_code(size_code_base)
-				fs_add *= dims_prod  # TODO? go back to integer counts if we change parse_struct to not rely on string length anywhere
-				idx_add *= dims_prod
+				idx_add_base, fs_add_base = get_type_code(size_code_base)
+				fs_add = str(dims_prod) + fs_add_base if len(fs_add_base) == 1 else fs_add_base * dims_prod
+				idx_add = idx_add_base * dims_prod
 
 		elif size_code == "STRING":
 			str_len = get_str_len(data[idx:])
@@ -217,24 +218,22 @@ def parse_struct(data, size_codes, var_names):
 	for var_name, format_el in zip(var_names, format_str[out_idx:]):
 		# STRINGs come back as two items (the string length, then the string itself -- for example the format "H19s" will be two items: the unsigned int 19, followed by a 19-character string). struct.unpack (called in read_struct and returned here as struct_data) interprets a pattern consisting of an integer followed by "s" as a single string, so the entire string will be one element of struct_data and n_items should be 2.
 		# Arrays, however, aren't automatically grouped this way -- each byte is one element of struct_data. So we have to set n_items appropriately based on the format.
-		# The length of the format_el string (excluding digits for length of STRINGs) should directly correspond to the number of elements read into struct_data for the current variable/size_code
-		# TODO? Find a different way (and use integer counts for repeats) because the below line slows us down significantly
-		n_items = sum(not ch.isdigit() for ch in format_el)
-		var_items = list(struct_data[out_idx:out_idx + n_items])  # TODO? More efficient if this isn't a list?
+		if len(format_el) > 0 and format_el[0].isdigit():
+			n_items = int(re.search(r"^\d+", format_el).group())
+			var_items = struct_data[out_idx:out_idx + n_items]
+		elif len(format_el) > 0 and format_el[0] == "H" and format_el[-1] == "s":
+			n_strings = len(re.findall(r"H\d+s", format_el))
+			var_items = []
+			for i in range(0, n_strings*2, 2):
+				# Skip the STRING length element(s) and discard NULL terminator(s)
+				var_items.append(struct_data[out_idx + i + 1].decode()[:-1])
+				# TODO multiple null characters allowed at end of string -- check for
+			n_items = 2*n_strings
+		else:
+			n_items = len(format_el)
+			var_items = struct_data[out_idx:out_idx + n_items]
+
 		out_idx += n_items
-
-		# Discard the STRING length element; also decode the string and discard the NULL terminator
-		str_len_idxs = []
-		var_items_idx = 0
-		for format_el_idx in range(len(format_el) - 1):
-			if format_el[format_el_idx + 1].isdigit() and not format_el[format_el_idx].isdigit():
-				assert(format_el[format_el_idx] == "H")
-				str_len_idxs.append(var_items_idx)
-				var_items[var_items_idx + 1] = var_items[var_items_idx + 1].decode()[:-1]
-			if not format_el[format_el_idx].isdigit():
-				var_items_idx += 1
-		var_items = [item for i, item in enumerate(var_items) if i not in str_len_idxs]
-
 		instance[var_name] = var_items
 
 	return n_bytes, instance
