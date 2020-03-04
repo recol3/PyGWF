@@ -12,35 +12,35 @@ FRSE_CODES = ("STRING",)*3 + ("INT_4U",)
 FRSH_CLASS = 1
 FRSE_CLASS = 2
 
+ligo_dtypes = {
+	# "LIGO name": (num bytes, struct code)
+	"CHAR":   (1, "c"),
+	"CHAR_U": (1, "B"),
+	"INT_2S": (2, "h"),
+	"INT_2U": (2, "H"),
+	"INT_4S": (4, "i"),
+	"INT_4U": (4, "I"),
+	"INT_8S": (8, "q"),
+	"INT_8U": (8, "Q"),
+	"REAL_4": (4, "f"),
+	"REAL_8": (8, "d"),
+}
+ligo_dtypes.update({
+	"PTR_STRUCT": (ligo_dtypes["INT_2U"][0] + ligo_dtypes["INT_4U"][0], ligo_dtypes["INT_2U"][1] + ligo_dtypes["INT_4U"][1]),
+	"COMPLEX_8":  (ligo_dtypes["REAL_4"][0] + ligo_dtypes["REAL_4"][0], ligo_dtypes["REAL_4"][1] + ligo_dtypes["REAL_4"][1]),
+	"COMPLEX_16": (ligo_dtypes["REAL_8"][0] + ligo_dtypes["REAL_8"][0], ligo_dtypes["REAL_8"][1] + ligo_dtypes["REAL_8"][1]),
+})
+
 
 def get_type_code(ligo_name, str_len=None):
-	types = {
-		# "LIGO name": (num bytes, struct code)
-		"CHAR":   (1, "c"),
-		"CHAR_U": (1, "B"),
-		"INT_2S": (2, "h"),
-		"INT_2U": (2, "H"),
-		"INT_4S": (4, "i"),
-		"INT_4U": (4, "I"),
-		"INT_8S": (8, "q"),
-		"INT_8U": (8, "Q"),
-		"REAL_4": (4, "f"),
-		"REAL_8": (8, "d"),
-	}
-	types.update({
-		"PTR_STRUCT": (types["INT_2U"][0] + types["INT_4U"][0], types["INT_2U"][1] + types["INT_4U"][1]),
-		"COMPLEX_8":  (types["REAL_4"][0] + types["REAL_4"][0], types["REAL_4"][1] + types["REAL_4"][1]),
-		"COMPLEX_16": (types["REAL_8"][0] + types["REAL_8"][0], types["REAL_8"][1] + types["REAL_8"][1]),
-	})
-
 	if ligo_name == "STRING":
 		if str_len is None or str_len < 1:
 			raise ValueError
-		return types["INT_2U"][0] + str_len*types["CHAR"][0], types["INT_2U"][1] + str(str_len) + "s"
+		return ligo_dtypes["INT_2U"][0] + str_len * ligo_dtypes["CHAR"][0], ligo_dtypes["INT_2U"][1] + str(str_len) + "s"
 	elif ligo_name[:len("PTR_STRUCT")] == "PTR_STRUCT":
-		return types["PTR_STRUCT"]
+		return ligo_dtypes["PTR_STRUCT"]
 	else:
-		return types[ligo_name]
+		return ligo_dtypes[ligo_name]
 
 
 def get_str_len(data):
