@@ -1,8 +1,10 @@
+import os
 import numpy as np
 import struct
 import re
 import datetime
 import zlib
+import multiprocessing
 
 
 COMMON_CODES = ("INT_8U", "CHAR_U", "CHAR_U", "INT_4U")
@@ -420,3 +422,29 @@ def read_frame(frame_data, print_progress=False):
 	assert(idx == len(frame_data))
 
 	return classes, instances
+
+
+def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
+	if os.path.splitext(frame_path)[1] != ".gwf":
+		raise ValueError
+	frame_data = np.fromfile(frame_path, dtype=np.uint8)
+	classes, instances = read_frame(frame_data)
+	frvect_key = [key for key, val in classes.items() if val[0] == "FrVect"][0]
+	frvect_instances = instances[frvect_key]
+	if channels is None:
+		channels = [el["name"][0] for el in frvect_instances]
+	ch_idxs_dict = {el["name"][0]: idx for idx, el in enumerate(frvect_instances) if el["name"][0] in channels}
+
+	output = {}
+	if multiprocess:
+		frvect_instances_extract = [frvect_instances[ch_idxs_dict[ch]] for ch in channels]
+		with multiprocessing.Pool() as pool:
+			mp_output_list = pool.map(decompress_frvect, frvect_instances_extract)  # TODO imap?
+		for ch, mp_output in zip(channels, mp_output_list):
+			output[ch] = mp_output
+	else:
+		for ch in channels:
+			idx = ch_idxs_dict[ch]
+			output[ch] = decompress_frvect(frvect_instances[idx])
+
+	return output
