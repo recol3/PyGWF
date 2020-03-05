@@ -210,6 +210,8 @@ def parse_dict(data):
 	return idx, struct_name, struct_class, struct_comment, var_names, size_codes, var_comments
 
 
+repeat_count_regex = re.compile(r"^\d+")
+string_regex = re.compile(r"H\d+s")
 def parse_struct(data, size_codes, var_names):
 	n_bytes, struct_data, format_str = read_struct_with_common(data, size_codes, var_names)
 
@@ -219,10 +221,10 @@ def parse_struct(data, size_codes, var_names):
 		# STRINGs come back as two items (the string length, then the string itself -- for example the format "H19s" will be two items: the unsigned int 19, followed by a 19-character string). struct.unpack (called in read_struct and returned here as struct_data) interprets a pattern consisting of an integer followed by "s" as a single string, so the entire string will be one element of struct_data and n_items should be 2.
 		# Arrays, however, aren't automatically grouped this way -- each byte is one element of struct_data. So we have to set n_items appropriately based on the format.
 		if len(format_el) > 0 and format_el[0].isdigit():
-			n_items = int(re.search(r"^\d+", format_el).group())
+			n_items = int(repeat_count_regex.search(format_el).group())
 			var_items = struct_data[out_idx:out_idx + n_items]
 		elif len(format_el) > 0 and format_el[0] == "H" and format_el[-1] == "s":
-			n_strings = len(re.findall(r"H\d+s", format_el))
+			n_strings = len(string_regex.findall(format_el))
 			var_items = []
 			for i in range(0, n_strings*2, 2):
 				# Skip the STRING length element(s) and discard NULL terminator(s)
