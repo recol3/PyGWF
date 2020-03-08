@@ -378,6 +378,7 @@ def decompress_frvect(frvect_instance):
 	data_type = frvect_instance["type"][0]
 	n_bytes = frvect_instance["nBytes"][0]
 	n_data = frvect_instance["nData"][0]
+	# TODO return ch name and use imap_unordered?
 
 	if compress_id == 257:
 		return decompress_gzip(data=data, data_type=data_type, n_data=n_data)
@@ -438,10 +439,14 @@ def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
 	output = {}
 	if multiprocess:
 		frvect_instances_extract = [frvect_instances[ch_idxs_dict[ch]] for ch in channels]
+		shuf = np.random.permutation(len(frvect_instances_extract))  # Significant speed improvement
 		with multiprocessing.Pool() as pool:
-			mp_output_list = pool.map(decompress_frvect, frvect_instances_extract)  # TODO imap?
-		for ch, mp_output in zip(channels, mp_output_list):
-			output[ch] = mp_output
+			mp_output = pool.map(decompress_frvect, np.array(frvect_instances_extract)[shuf])  #, chunksize=20)
+			# Setting chunksize (tried 20 and 100) seems to make a mostly insignificant improvement, and imap doesn't work.
+			# Seems to require ~60 GB RAM under normal circumstances, but observed taking 120+ GB in a Jupyter notebook -- back to normal after kernel restart. Maybe because had previously attempted to run and then interrupted it?
+		for idx, mp_output_cur in enumerate(mp_output):
+			ch = channels[shuf[idx]]
+			output[ch] = mp_output_cur
 	else:
 		for ch in channels:
 			idx = ch_idxs_dict[ch]
