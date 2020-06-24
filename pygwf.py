@@ -5,6 +5,7 @@ import re
 import datetime
 import zlib
 import multiprocessing
+import warnings
 
 
 COMMON_CODES = ("INT_8U", "CHAR_U", "CHAR_U", "INT_4U")
@@ -363,8 +364,11 @@ def decompress_zsup(data, data_type, n_data, n_bytes):
 	assert(not np.any(data_bits_swapped[bit_idx:]))  # ...which should be all 0
 
 	# Undo differentiation
-	for i in range(len(decompressed) - 1):
-		decompressed[i + 1] = decompressed[i] + decompressed[i + 1]
+	with warnings.catch_warnings():
+		# Ignore overflow warning (overflow is expected)
+		warnings.filterwarnings(action="ignore", message="overflow encountered", category=RuntimeWarning)
+		for i in range(len(decompressed) - 1):
+			decompressed[i + 1] = decompressed[i] + decompressed[i + 1]
 
 	# View as actual dtype
 	decompressed = decompressed.view(dtype)
