@@ -440,7 +440,7 @@ def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
 	frvect_instances_extract = [el for el in frvect_instances if el["name"][0] in channels]
 
 	output = {}
-	if multiprocess:
+	if multiprocess and len(frvect_instances_extract) > 1:
 		shuf = np.random.permutation(len(frvect_instances_extract))  # Significant speed improvement
 		with multiprocessing.Pool() as pool:
 			mp_output = pool.map(decompress_frvect, np.array(frvect_instances_extract)[shuf])  #, chunksize=20)
