@@ -436,24 +436,22 @@ def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
 	classes, instances = read_frame(frame_data)
 	frvect_key = [key for key, val in classes.items() if val[0] == "FrVect"][0]
 	frvect_instances = instances[frvect_key]
-	if channels is None:
-		channels = [el["name"][0] for el in frvect_instances]
-	ch_idxs_dict = {el["name"][0]: idx for idx, el in enumerate(frvect_instances) if el["name"][0] in channels}
+	channels = set(el["name"][0] for el in frvect_instances) if channels is None else set(channels)
+	frvect_instances_extract = [el for el in frvect_instances if el["name"][0] in channels]
 
 	output = {}
 	if multiprocess:
-		frvect_instances_extract = [frvect_instances[ch_idxs_dict[ch]] for ch in channels]
 		shuf = np.random.permutation(len(frvect_instances_extract))  # Significant speed improvement
 		with multiprocessing.Pool() as pool:
 			mp_output = pool.map(decompress_frvect, np.array(frvect_instances_extract)[shuf])  #, chunksize=20)
 			# Setting chunksize (tried 20 and 100) seems to make a mostly insignificant improvement, and imap doesn't work.
 			# Seems to require ~60 GB RAM under normal circumstances, but observed taking 120+ GB in a Jupyter notebook -- back to normal after kernel restart. Maybe because had previously attempted to run and then interrupted it?
 		for idx, mp_output_cur in enumerate(mp_output):
-			ch = channels[shuf[idx]]
+			ch = frvect_instances_extract[shuf[idx]]["name"][0]
 			output[ch] = mp_output_cur
 	else:
-		for ch in channels:
-			idx = ch_idxs_dict[ch]
-			output[ch] = decompress_frvect(frvect_instances[idx])
+		for frvect_instance in frvect_instances_extract:
+			ch = frvect_instance["name"][0]
+			output[ch] = decompress_frvect(frvect_instance)
 
 	return output
