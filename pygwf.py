@@ -393,16 +393,16 @@ def decompress_frvect(frvect_instance):
 		raise NotImplementedError
 
 
-def read_frame(frame_data, print_progress=False):
-	idx, header_out, _ = read_frheader(frame_data)
+def parse_gwf_data(gwf_data, print_progress=False):
+	idx, header_out, _ = read_frheader(gwf_data)
 
 	pct_done = 0
 	classes = {}
 	instances = {}
-	while idx < len(frame_data):
-		next_class, next_instance = read_common(frame_data[idx:])[1][2:4]
+	while idx < len(gwf_data):
+		next_class, next_instance = read_common(gwf_data[idx:])[1][2:4]
 		if next_class == FRSH_CLASS:
-			n_bytes, new_struct_name, new_struct_class, new_struct_comment, new_struct_var_names, new_struct_size_codes, new_struct_var_comments = parse_dict(frame_data[idx:])
+			n_bytes, new_struct_name, new_struct_class, new_struct_comment, new_struct_var_names, new_struct_size_codes, new_struct_var_comments = parse_dict(gwf_data[idx:])
 			classes[new_struct_class] = (new_struct_name, new_struct_comment, new_struct_var_names, new_struct_size_codes, new_struct_var_comments)
 
 		else:
@@ -414,26 +414,26 @@ def read_frame(frame_data, print_progress=False):
 			# Instance counts are reset at the end of each (sub)frame
 
 			var_names, size_codes = classes[next_class][2:4]
-			n_bytes, instance = parse_struct(frame_data[idx:], size_codes, var_names)
+			n_bytes, instance = parse_struct(gwf_data[idx:], size_codes, var_names)
 			instances[next_class].append(instance)
 
 		idx += n_bytes
 
 		if print_progress:
-			if idx*100 // len(frame_data) - pct_done >= 1:
-				pct_done = idx*100 // len(frame_data)
+			if idx*100 // len(gwf_data) - pct_done >= 1:
+				pct_done = idx*100 // len(gwf_data)
 				print("{}: {}%".format(datetime.datetime.now(), pct_done))
 
-	assert(idx == len(frame_data))
+	assert(idx == len(gwf_data))
 
 	return classes, instances
 
 
-def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
-	if os.path.splitext(frame_path)[1] != ".gwf":
+def get_frvects_from_gwf(gwf_path, channels=None, multiprocess=True):
+	if os.path.splitext(gwf_path)[1] != ".gwf":
 		raise ValueError
-	frame_data = np.fromfile(frame_path, dtype=np.uint8)
-	classes, instances = read_frame(frame_data)
+	gwf_data = np.fromfile(gwf_path, dtype=np.uint8)
+	classes, instances = parse_gwf_data(gwf_data)
 	frameh_key = [key for key, val in classes.items() if val[0] == "FrameH"][0]
 	n_frames = len(instances[frameh_key])
 	frvect_key = [key for key, val in classes.items() if val[0] == "FrVect"][0]
