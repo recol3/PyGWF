@@ -434,10 +434,20 @@ def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
 		raise ValueError
 	frame_data = np.fromfile(frame_path, dtype=np.uint8)
 	classes, instances = read_frame(frame_data)
+	frameh_key = [key for key, val in classes.items() if val[0] == "FrameH"][0]
+	n_frames = len(instances[frameh_key])
 	frvect_key = [key for key, val in classes.items() if val[0] == "FrVect"][0]
 	frvect_instances = instances[frvect_key]
 	channels = set(el["name"][0] for el in frvect_instances) if channels is None else set(channels)
 	frvect_instances_extract = [el for el in frvect_instances if el["name"][0] in channels]
+
+	ch_idxs_dict = {ch: [] for ch in channels}
+	for idx, frvect_instance in enumerate(frvect_instances_extract):
+		ch = frvect_instance["name"][0]
+		ch_idxs_dict[ch].append(idx)
+	for ch in channels:
+		if len(ch_idxs_dict[ch]) != n_frames:
+			raise ValueError
 
 	output = {}
 	if multiprocess and len(frvect_instances_extract) > 1:
@@ -446,12 +456,11 @@ def get_frvects_from_frame(frame_path, channels=None, multiprocess=True):
 			mp_output = pool.map(decompress_frvect, np.array(frvect_instances_extract)[shuf])  #, chunksize=20)
 			# Setting chunksize (tried 20 and 100) seems to make a mostly insignificant improvement, and imap doesn't work.
 			# Seems to require ~60 GB RAM under normal circumstances, but observed taking 120+ GB in a Jupyter notebook -- back to normal after kernel restart. Maybe because had previously attempted to run and then interrupted it?
-		for idx, mp_output_cur in enumerate(mp_output):
-			ch = frvect_instances_extract[shuf[idx]]["name"][0]
-			output[ch] = mp_output_cur
+		mp_output = np.array(mp_output)[np.argsort(shuf)]  # Unshuffle
+		for ch in channels:
+			output[ch] = np.hstack([mp_output[idx] for idx in ch_idxs_dict[ch]])
 	else:
-		for frvect_instance in frvect_instances_extract:
-			ch = frvect_instance["name"][0]
-			output[ch] = decompress_frvect(frvect_instance)
+		for ch in channels:
+			output[ch] = np.hstack([decompress_frvect(frvect_instances_extract[idx]) for idx in ch_idxs_dict[ch]])
 
 	return output
