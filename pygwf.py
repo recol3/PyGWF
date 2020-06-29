@@ -438,7 +438,7 @@ def get_frvects_from_gwf(gwf_path, channels=None, multiprocess=True):
 	n_frames = len(instances[frameh_key])
 	frvect_key = [key for key, val in classes.items() if val[0] == "FrVect"][0]
 	frvect_instances = instances[frvect_key]
-	channels = set(el["name"][0] for el in frvect_instances) if channels is None else set(channels)
+	channels = set(el["name"][0] for el in frvect_instances if el["name"][0] != "dataValid") if channels is None else set(channels)
 	frvect_instances_extract = [el for el in frvect_instances if el["name"][0] in channels]
 
 	ch_idxs_dict = {ch: [] for ch in channels}
