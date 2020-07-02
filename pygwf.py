@@ -431,6 +431,16 @@ def parse_gwf_data(gwf_data, print_progress=False):
 def get_frvects_from_gwf(gwf_path, channels=None, multiprocess=True):
 	if os.path.splitext(gwf_path)[1] != ".gwf":
 		raise ValueError
+	if isinstance(multiprocess, bool):
+		if multiprocess:
+			n_processes = multiprocessing.cpu_count()
+		else:
+			n_processes = 1
+	elif isinstance(multiprocess, int) and multiprocess >= 1:
+		n_processes = multiprocess
+	else:
+		raise ValueError
+
 	gwf_data = np.fromfile(gwf_path, dtype=np.uint8)
 	classes, instances = parse_gwf_data(gwf_data)
 	frameh_key = [key for key, val in classes.items() if val[0] == "FrameH"][0]
@@ -451,7 +461,7 @@ def get_frvects_from_gwf(gwf_path, channels=None, multiprocess=True):
 	output = {}
 	if multiprocess and len(frvect_instances_extract) > 1:
 		shuf = np.random.permutation(len(frvect_instances_extract))  # Significant speed improvement
-		with multiprocessing.Pool() as pool:
+		with multiprocessing.Pool(processes=n_processes) as pool:
 			mp_output = pool.map(decompress_frvect, np.array(frvect_instances_extract)[shuf])  #, chunksize=20)
 			# Setting chunksize (tried 20 and 100) seems to make a mostly insignificant improvement
 		mp_output = np.array(mp_output)[np.argsort(shuf)]  # Unshuffle
